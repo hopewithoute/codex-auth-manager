@@ -1,22 +1,29 @@
 {
   "name": "codex-auth-manager",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "description": "A CLI to check quota and manage auto-switching of Codex API authentication accounts.",
+  "main": "dist/index.js",
   "bin": {
     "codex-auth": "dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "codex",
+    "auth",
+    "manager",
+    "cli",
+    "quota",
+    "openai"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "devDependencies": {
     "@types/node": "^26.1.0",
     "typescript": "^6.0.3"

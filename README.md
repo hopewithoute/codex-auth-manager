@@ -1,15 +1,35 @@
-# Codex Auth
+# Codex Auth Manager
 
 A simple CLI to check the remaining quota of your OpenAI/Codex accounts and switch between them quickly, straight from your terminal. No heavy third-party libraries, just pure Node.js + TypeScript.
 
-## How to Install
+## Installation & Usage
+
+You can run Codex Auth Manager instantly using `npx` without installing it:
 
 ```bash
-# Compile the typescript
-npm run build
+npx codex-auth-manager
+```
 
-# Register the command globally
-npm link
+Or, install it globally via `npm` to use the `codex-auth` command anywhere:
+
+```bash
+npm install -g codex-auth-manager
+codex-auth
+```
+
+## Configuration & Pool Directory
+
+The manager stores its configurations locally in your home directory (`~/.codex/`):
+
+- **Auth Pool Folder**: `~/.codex/pool/`
+  Place all your JSON auth files here. Each file represents an account and should contain your `access_token` and `account_id`.
+- **Active Auth File**: `~/.codex/auth.json`
+  When you switch accounts (manually or via `auto`), the CLI will copy the chosen account from the pool into this active auth file.
+
+### Adding Accounts to the Pool
+You can manually drop `.json` files into `~/.codex/pool/`, or if you already have an active `auth.json`, save it to the pool using:
+```bash
+codex-auth save <account_name>
 ```
 
 ## How to Use
