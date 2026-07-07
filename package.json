@@ -1,6 +1,6 @@
 {
   "name": "codex-auth-manager",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A CLI to check quota and manage auto-switching of Codex API authentication accounts.",
   "main": "dist/index.js",
   "bin": {
@@ -22,7 +22,7 @@
     "openai"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "@types/node": "^26.1.0",
