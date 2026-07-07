@@ -19,6 +19,7 @@ Just type `codex-auth` in your terminal. You'll see a table showing the remainin
 Just use your arrow keys (**⬆️ / ⬇️**) to pick the account you want to use, then press **Enter**. The tool will automatically copy the account's JSON file to `~/.codex/auth.json` and immediately run your `codex` command.
 
 **Other commands:**
+- `codex-auth auto` (or `--auto`) — Automatically picks the account with the highest available quota (Prioritizing Primary 5h) and immediately runs it.
 - `codex-auth save <account_name>` — Saves your currently active auth into the pool folder. Do this first if your pool is empty!
 - `codex-auth check` — Just checks the quota for all accounts without prompting to pick one.
 - `codex-auth switch <account_name>` — Manually switches the active account if you don't feel like using the interactive menu.

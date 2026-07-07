@@ -61,7 +61,7 @@ interface AuthFile { tokens?: { access_token?: string; }; account_id?: string; }
 interface WindowData { used_percent?: number; reset_at?: number | string; }
 interface RateLimitData { primary_window?: WindowData; primary?: WindowData; secondary_window?: WindowData; secondary?: WindowData; }
 interface APIResponse { plan_type?: string; rate_limit?: RateLimitData; rate_limits?: RateLimitData; }
-export interface QuotaRow { AccountRaw: string; Account: string; Plan: string; 'Primary (5h)': string; 'Secondary (1w)': string; [key: string]: string; }
+export interface QuotaRow { AccountRaw: string; Account: string; Plan: string; 'Primary (5h)': string; 'Secondary (1w)': string; _score?: number; [key: string]: any; }
 
 async function fetchUsage(token: string, accountId: string): Promise<APIResponse | string> {
     const response = await fetch(CONFIG.usageUrl, {
@@ -94,8 +94,8 @@ function parseWindow(windowData?: WindowData, defaultText = "-"): string {
 }
 
 async function checkSingleQuota(filePath: string, name: string): Promise<QuotaRow> {
-    const mkRow = (Plan: string, p = '-', s = '-'): QuotaRow => 
-        ({ AccountRaw: name, Account: name, Plan, 'Primary (5h)': p, 'Secondary (1w)': s });
+    const mkRow = (Plan: string, p = '-', s = '-', _score = -999): QuotaRow => 
+        ({ AccountRaw: name, Account: name, Plan, 'Primary (5h)': p, 'Secondary (1w)': s, _score });
     
     try {
         const fileContent = await fs.promises.readFile(filePath, 'utf-8');
@@ -106,10 +106,28 @@ async function checkSingleQuota(filePath: string, name: string): Promise<QuotaRo
         if (typeof res === "string") return mkRow(res);
 
         const limits = res.rate_limit || res.rate_limits || {};
+        const pw = limits.primary_window || limits.primary;
+        const sw = limits.secondary_window || limits.secondary;
+
+        let primaryLeft = 100;
+        if (pw?.used_percent !== undefined) primaryLeft = Math.max(0, 100 - pw.used_percent);
+
+        let secondaryLeft = 100;
+        if (sw?.used_percent !== undefined) secondaryLeft = Math.max(0, 100 - sw.used_percent);
+
+        let score = (primaryLeft * 0.7) + (secondaryLeft * 0.3);
+        
+        // Tie-breaker if score is 0 but it will reset eventually
+        if (score === 0 && pw?.reset_at) {
+            const diff = (typeof pw.reset_at === "string" ? new Date(pw.reset_at) : new Date(Number(pw.reset_at) * 1000)).getTime() - Date.now();
+            if (diff > 0) score = -(diff / 18000000); // Small negative score based on wait time (shorter wait = higher score)
+        }
+
         return mkRow(
             `${C.magenta}${res.plan_type || "Unknown"}${C.reset}`,
-            parseWindow(limits.primary_window || limits.primary, "Unlimited"),
-            parseWindow(limits.secondary_window || limits.secondary, "-")
+            parseWindow(pw, "Unlimited"),
+            parseWindow(sw, "-"),
+            score
         );
     } catch {
         return mkRow(`${C.red}Error${C.reset}`);
@@ -144,7 +162,7 @@ const spinner = {
 function printTable(data: QuotaRow[], selectedIndex: number = -1): void {
     if (data.length === 0) return;
     
-    const keys = Object.keys(data[0]).filter(k => k !== 'AccountRaw');
+    const keys = Object.keys(data[0]).filter(k => k !== 'AccountRaw' && !k.startsWith('_'));
     const colWidths = Object.fromEntries(keys.map(k => [k, Math.max(stripAnsi(k).length, ...data.map(row => stripAnsi(row[k] || '').length))]));
     const pad = (text: string, width: number) => `${text}${' '.repeat(width - stripAnsi(text).length)}`;
     
@@ -277,27 +295,75 @@ async function defaultWorkflow(): Promise<void> {
     });
 }
 
+async function autoWorkflow(): Promise<void> {
+    printBanner();
+    const results = await checkAll();
+    if (!results || results.length === 0) return;
+
+    const validResults = results.filter(r => (r._score ?? -999) > -999);
+    if (validResults.length === 0) {
+        console.error(`  ${C.red}✖${C.reset} No valid accounts available to auto-select.\n`);
+        return;
+    }
+
+    // Sort by _score descending
+    validResults.sort((a, b) => (b._score ?? -999) - (a._score ?? -999));
+    const selected = validResults[0];
+
+    console.log(`\n  ${C.cyan}💡 Auto-selected account with highest score (${(selected._score ?? 0).toFixed(2)}): ${C.bold}${selected.AccountRaw}${C.reset}`);
+    await fs.promises.copyFile(path.join(CONFIG.poolDir, `${selected.AccountRaw}.json`), CONFIG.activeAuth);
+    console.log(`  ${C.green}✔${C.reset} Successfully switched active auth to: ${C.bold}${selected.AccountRaw}${C.reset}`);
+    
+    const codexArgs = process.argv.slice(2).filter((arg: string) => arg !== 'start' && arg !== 'auto' && arg !== '--auto'); 
+    console.log(`  ${C.cyan}🚀 Running codex...${C.reset}\n`);
+    
+    spawn('codex', codexArgs, { stdio: 'inherit' }).on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') {
+            console.log(`  ${C.yellow}⚠${C.reset} The 'codex' command was not found on your system.`);
+            console.log(`    ${C.dim}Auth switched successfully. You may run your AI CLI manually.${C.reset}\n`);
+        } else console.error(`  ${C.red}✖${C.reset} Failed to run codex: ${err.message}\n`);
+    });
+}
+
 // -----------------------------------------------------------------------------
 // CLI Entry Point
 // -----------------------------------------------------------------------------
 
-const [cmd, arg1] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const isAuto = args.includes('auto') || args.includes('--auto');
+const filteredArgs = args.filter(a => a !== 'auto' && a !== '--auto');
+const cmd = filteredArgs[0];
+const arg1 = filteredArgs[1];
 
-switch (cmd) {
-    case 'save': saveAuth(arg1).catch(console.error); break;
-    case 'switch': switchAuth(arg1).catch(console.error); break;
-    case 'check':
-        printBanner();
-        checkAll().then(r => { if (r) { printTable(r, -1); console.log(); } });
-        break;
-    case 'start':
-    case undefined:
-        defaultWorkflow().catch(console.error);
-        break;
-    default:
-        printBanner();
-        console.log(`  ${C.dim}Usage:${C.reset}\n    ${C.cyan}codex-auth${C.reset}                ${C.gray}Interactive select & run${C.reset}`);
-        console.log(`    ${C.cyan}codex-auth save <name>${C.reset}    ${C.gray}Save active auth to pool${C.reset}`);
-        console.log(`    ${C.cyan}codex-auth switch [name]${C.reset}  ${C.gray}Switch active auth manually${C.reset}`);
-        console.log(`    ${C.cyan}codex-auth check${C.reset}          ${C.gray}Check quotas for all accounts${C.reset}\n`);
+if (isAuto && (!cmd || cmd === 'start')) {
+    autoWorkflow().catch(console.error);
+} else {
+    switch (cmd) {
+        case 'save': saveAuth(arg1).catch(console.error); break;
+        case 'switch': switchAuth(arg1).catch(console.error); break;
+        case 'check':
+            printBanner();
+            checkAll().then(r => { if (r) { printTable(r, -1); console.log(); } });
+            break;
+        case 'start':
+        case undefined:
+            if (filteredArgs.length > 0 && cmd !== 'start') {
+                printBanner();
+                console.log(`  ${C.dim}Usage:${C.reset}\n    ${C.cyan}codex-auth${C.reset}                ${C.gray}Interactive select & run${C.reset}`);
+                console.log(`    ${C.cyan}codex-auth auto${C.reset}           ${C.gray}Auto-select highest quota & run${C.reset}`);
+                console.log(`    ${C.cyan}codex-auth save <name>${C.reset}    ${C.gray}Save active auth to pool${C.reset}`);
+                console.log(`    ${C.cyan}codex-auth switch [name]${C.reset}  ${C.gray}Switch active auth manually${C.reset}`);
+                console.log(`    ${C.cyan}codex-auth check${C.reset}          ${C.gray}Check quotas for all accounts${C.reset}\n`);
+            } else {
+                defaultWorkflow().catch(console.error);
+            }
+            break;
+        default:
+            printBanner();
+            console.log(`  ${C.dim}Usage:${C.reset}\n    ${C.cyan}codex-auth${C.reset}                ${C.gray}Interactive select & run${C.reset}`);
+            console.log(`    ${C.cyan}codex-auth auto${C.reset}           ${C.gray}Auto-select highest quota & run${C.reset}`);
+            console.log(`    ${C.cyan}codex-auth save <name>${C.reset}    ${C.gray}Save active auth to pool${C.reset}`);
+            console.log(`    ${C.cyan}codex-auth switch [name]${C.reset}  ${C.gray}Switch active auth manually${C.reset}`);
+            console.log(`    ${C.cyan}codex-auth check${C.reset}          ${C.gray}Check quotas for all accounts${C.reset}\n`);
+    }
 }
